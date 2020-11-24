@@ -28,6 +28,7 @@ typedef enum {
     MENU_CALL = 0,
     MENU_BOOL,
     MENU_INTEGER,
+    MENU_ENUM,
 } menu_action_type;
 
 typedef void (*menu_action_call)(void);
@@ -44,21 +45,28 @@ typedef struct {
 } menu_action_int;
 
 typedef struct {
+    void (*up)(void);
+    void (*down)(void);
+    const char * (*get)(void);
+} menu_action_enum;
+
+typedef struct {
     menu_action_type tp;
     union {
         menu_action_call _call;
         menu_action_bool _bool;
         menu_action_int _int;
+        menu_action_enum _enum;
     };
 } menu_action;
 
 typedef struct {
-    const char *text;
+    const char * PROGMEM text;
     menu_action action;
 } menu_line;
 
 typedef struct menu_layer {
-    struct menu_layer *prev;
+    const struct menu_layer *prev;
     menu_line lines[];
 } menu_layer;
 
@@ -67,7 +75,7 @@ static struct {
     uint8_t index;
     uint8_t is_dirty;
     menu_action_type current_action;
-    menu_layer *current_menu_layer;
+    menu_layer const * current_menu_layer;
 } menu_state;
 
 size_t menu_layer_lines(void) {
@@ -77,7 +85,7 @@ size_t menu_layer_lines(void) {
 }
 
 menu_action menu_current_action(void) {
-    return menu_state.current_menu_layer->lines[menu_state.index % n].action;
+    return menu_state.current_menu_layer->lines[menu_state.index % menu_layer_lines()].action;
 }
 
 void menu_back(void) {
@@ -91,6 +99,8 @@ void menu_back(void) {
 }
 
 void menu_goto_rgb(void);
+void menu_goto_oled(void);
+void menu_goto_other(void);
 
 void set_rgb_state(bool b) {
     if (b) {
@@ -100,17 +110,18 @@ void set_rgb_state(bool b) {
     }
 }
 
-static menu_layer menu_layer_root = {
+static const menu_layer menu_layer_root = {
     .prev = 0,
     .lines = {
         { .text = "RGB", .action = { .tp = MENU_CALL, ._call = menu_goto_rgb } },
-        { .text = "Other", .action = { .tp = MENU_CALL, ._call = menu_goto_rgb } },
+        { .text = "OLED", .action = { .tp = MENU_CALL, ._call = menu_goto_oled } },
+        { .text = "Other", .action = { .tp = MENU_CALL, ._call = menu_goto_other } },
         { .text = "< Back", .action = { .tp = MENU_CALL, ._call = menu_back}, },
         { .text = 0, },
     },
 };
 
-static menu_layer menu_layer_rgb = {
+static const menu_layer menu_layer_rgb = {
     .prev = &menu_layer_root,
     .lines = {
         { .text = "Toggle", .action = { .tp = MENU_BOOL, ._bool = { .get = rgblight_is_enabled, .set = set_rgb_state}, } },
@@ -127,6 +138,38 @@ void menu_goto_rgb(void) {
     menu_state.index = 0;
 }
 
+void oled_brightness_up(void) {
+    oled_set_brightness(oled_get_brightness()+1);
+}
+
+void oled_brightness_down(void) {
+    oled_set_brightness(oled_get_brightness()-1);
+}
+
+void toggle_oled(bool b) {
+    if (b) {
+        oled_on();
+    } else {
+        oled_off();
+    }
+}
+
+static const menu_layer menu_layer_oled = {
+    .prev = &menu_layer_root,
+    .lines = {
+        { .text = "Toggle", .action = { .tp = MENU_BOOL, ._bool = { .get = is_oled_on, .set = toggle_oled}, } },
+        { .text = "Brightness", .action = { .tp = MENU_INTEGER, ._int = { .get = oled_get_brightness, .up = oled_brightness_up, .down = oled_brightness_down }}, },
+        { .text = "< Back", .action = { .tp = MENU_CALL, ._call = menu_back}, },
+        { .text = 0, },
+    },
+};
+
+void menu_goto_oled(void) {
+    menu_state.current_menu_layer = &menu_layer_oled;
+    menu_state.is_dirty = true;
+    menu_state.index = 0;
+}
+
 enum layers {
     _QWERTY = 0,
     _LOWER,
@@ -136,7 +179,7 @@ enum layers {
 
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
         [_QWERTY] = LAYOUT(KC_TAB, KC_Q, KC_W, KC_E, KC_R, KC_T, KC_Y, KC_U, KC_I, KC_O, KC_P, KC_BSLS, KC_LCTL, KC_A, KC_S, KC_D, KC_F, KC_G, KC_H, KC_J, KC_K, KC_L, KC_SCLN, KC_QUOT, KC_LSFT, KC_Z, KC_X, KC_C, KC_V, KC_B, KC_SPC, KC_BSPC, KC_LSFT, MO(2), KC_N, KC_M, KC_COMM, KC_DOT, KC_SLSH, KC_MINS, KC_LGUI, KC_LALT, KC_GESC, KC_SPC, KC_BSPC, KC_ENT, MO(1), KC_UP, KC_DOWN, MENU_SELECT),
-        [_LOWER] = LAYOUT(RGB_TOG, KC_EXLM, KC_AT, KC_LCBR, KC_RCBR, KC_PIPE, KC_AMPR, KC_P7, KC_P8, KC_P9, KC_PAST, KC_PMNS, RGB_VAI, KC_HASH, KC_DLR, KC_LPRN, KC_RPRN, KC_EQL, KC_MINS, KC_P4, KC_P5, KC_P6, KC_EQL, KC_PPLS, RGB_VAD, KC_PERC, KC_CIRC, KC_LBRC, KC_RBRC, KC_AMPR, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_UNDS, KC_P1, KC_P2, KC_P3, KC_P0, KC_PSLS, KC_TRNS, KC_TRNS, KC_TRNS, KC_SCLN, KC_EQL, KC_EQL, KC_TRNS, KC_TRNS, KC_TRNS, KC_MUTE),
+        [_LOWER] = LAYOUT(RGB_TOG, KC_EXLM, KC_AT, KC_LCBR, KC_RCBR, KC_PIPE, KC_AMPR, KC_7, KC_8, KC_9, KC_PAST, KC_PMNS, RGB_VAI, KC_HASH, KC_DLR, KC_LPRN, KC_RPRN, KC_EQL, KC_MINS, KC_4, KC_5, KC_6, KC_PPLS, KC_PPLS, RGB_VAD, KC_PERC, KC_CIRC, KC_LBRC, KC_RBRC, KC_AMPR, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_UNDS, KC_1, KC_2, KC_3, KC_0, KC_PSLS, KC_TRNS, KC_TRNS, KC_TRNS, KC_SCLN, KC_EQL, KC_EQL, KC_TRNS, KC_TRNS, KC_TRNS, KC_MUTE),
         [_RAISE] = LAYOUT(KC_TRNS, KC_1, KC_2, KC_3, KC_4, KC_5, KC_6, KC_7, KC_8, KC_9, KC_0, KC_TRNS, KC_TRNS, KC_TRNS, KC_MPRV, KC_MPLY, KC_MNXT, KC_VOLU, KC_LEFT, KC_DOWN, KC_UP, KC_RGHT, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_MUTE, KC_VOLD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_MS_L, KC_MS_D, KC_MS_U, KC_MS_R, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, RGB_TOG),
         [_ADJUST] = LAYOUT(KC_TRNS, KC_F1, KC_F2, KC_F3, KC_F4, KC_F5, KC_F6, KC_F7, KC_F8, KC_F9, KC_F10, KC_TRNS, KC_TRNS, RGB_TOG, RGB_SAI, RGB_HUI, RGB_VAI, RGB_MOD, KC_TRNS, KC_TRNS, KC_TRNS, KC_F11, KC_F12, KC_TRNS, KC_TRNS, KC_TRNS, RGB_SAD, RGB_HUD, RGB_VAD, RGB_RMOD, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS, KC_TRNS)
 };
@@ -149,20 +192,6 @@ layer_state_t layer_state_set_user(layer_state_t state) {
 oled_rotation_t oled_init_user(oled_rotation_t rotation) {
 	return OLED_ROTATION_180;
 }
-
-/* static void render_kyria_logo(void) { */
-/*     static const char PROGMEM kyria_logo[] = { */
-/*         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,128,128,192,224,240,112,120, 56, 60, 28, 30, 14, 14, 14,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7,  7, 14, 14, 14, 30, 28, 60, 56,120,112,240,224,192,128,128,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,  0,  0,  0,  0,192,224,240,124, 62, 31, 15,  7,  3,  1,128,192,224,240,120, 56, 60, 28, 30, 14, 14,  7,  7,135,231,127, 31,255,255, 31,127,231,135,  7,  7, 14, 14, 30, 28, 60, 56,120,240,224,192,128,  1,  3,  7, 15, 31, 62,124,240,224,192,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,  0,240,252,255, 31,  7,  1,  0,  0,192,240,252,254,255,247,243,177,176, 48, 48, 48, 48, 48, 48, 48,120,254,135,  1,  0,  0,255,255,  0,  0,  1,135,254,120, 48, 48, 48, 48, 48, 48, 48,176,177,243,247,255,254,252,240,192,  0,  0,  1,  7, 31,255,252,240,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,255,255,255,  0,  0,  0,  0,  0,254,255,255,  1,  1,  7, 30,120,225,129,131,131,134,134,140,140,152,152,177,183,254,248,224,255,255,224,248,254,183,177,152,152,140,140,134,134,131,131,129,225,120, 30,  7,  1,  1,255,255,254,  0,  0,  0,  0,  0,255,255,255,  0,  0,  0,  0,255,255,  0,  0,192,192, 48, 48,  0,  0,240,240,  0,  0,  0,  0,  0,  0,240,240,  0,  0,240,240,192,192, 48, 48, 48, 48,192,192,  0,  0, 48, 48,243,243,  0,  0,  0,  0,  0,  0, 48, 48, 48, 48, 48, 48,192,192,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,255,255,255,  0,  0,  0,  0,  0,127,255,255,128,128,224,120, 30,135,129,193,193, 97, 97, 49, 49, 25, 25,141,237,127, 31,  7,255,255,  7, 31,127,237,141, 25, 25, 49, 49, 97, 97,193,193,129,135, 30,120,224,128,128,255,255,127,  0,  0,  0,  0,  0,255,255,255,  0,  0,  0,  0, 63, 63,  3,  3, 12, 12, 48, 48,  0,  0,  0,  0, 51, 51, 51, 51, 51, 51, 15, 15,  0,  0, 63, 63,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, 48, 48, 63, 63, 48, 48,  0,  0, 12, 12, 51, 51, 51, 51, 51, 51, 63, 63,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,  0, 15, 63,255,248,224,128,  0,  0,  3, 15, 63,127,255,239,207,141, 13, 12, 12, 12, 12, 12, 12, 12, 30,127,225,128,  0,  0,255,255,  0,  0,128,225,127, 30, 12, 12, 12, 12, 12, 12, 12, 13,141,207,239,255,127, 63, 15,  3,  0,  0,128,224,248,255, 63, 15,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,  0,  0,  0,  0,  3,  7, 15, 62,124,248,240,224,192,128,  1,  3,  7, 15, 30, 28, 60, 56,120,112,112,224,224,225,231,254,248,255,255,248,254,231,225,224,224,112,112,120, 56, 60, 28, 30, 15,  7,  3,  1,128,192,224,240,248,124, 62, 15,  7,  3,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0, */
-/*         0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  1,  1,  3,  7, 15, 14, 30, 28, 60, 56,120,112,112,112,224,224,224,224,224,224,224,224,224,224,224,224,224,224,224,224,112,112,112,120, 56, 60, 28, 30, 14, 15,  7,  3,  1,  1,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0,  0 */
-/*     }; */
-/*     oled_write_raw_P(kyria_logo, sizeof(kyria_logo)); */
-/* } */
 
 static void render_qmk_logo(void) {
   static const char PROGMEM qmk_logo[] = {
@@ -334,18 +363,24 @@ static void render_menu(void) {
     size_t n = menu_layer_lines();
     for (int i = 0; i < n; i++) {
         menu_line line = menu_state.current_menu_layer->lines[i];
+        bool line_active = i == (menu_state.index % n);
         switch (line.action.tp) {
         case MENU_CALL:
-            oled_write_ln(line.text, i == (menu_state.index % n));
+            oled_write_ln(line.text, line_active);
             break;
         case MENU_BOOL:
-            oled_write(line.text, i == (menu_state.index % n));
-            oled_write_ln((line.action._bool.get() ? ": on" : ": off"), i == (menu_state.index % n));
+            oled_write(line.text, line_active);
+            oled_write_ln((line.action._bool.get() ? ": on" : ": off"), line_active);
             break;
         case MENU_INTEGER:
-            oled_write(line.text, i == (menu_state.index % n));
+            oled_write(line.text, line_active);
             snprintf(menu_str, sizeof(menu_str), ": %4u", line.action._int.get());
-            oled_write_ln(menu_str, (i == (menu_state.index % n)) && (menu_state.current_action == line.action.tp));
+            oled_write_ln(menu_str, line_active && (menu_state.current_action == line.action.tp));
+            break;
+        case MENU_ENUM:
+            oled_write(line.text, line_active);
+            oled_write(": ", line_active);
+            oled_write_ln(line.action._enum.get(), line_active && (menu_state.current_action == line.action.tp));
             break;
         }
     }
@@ -368,6 +403,43 @@ void oled_task_user(void) {
 #endif
 
 #ifdef ENCODER_ENABLE
+enum encoder_action_type {
+    ENCODER_RGB_VALUE = 0,
+    ENCODER_RGB_HUE,
+    ENCODER_VOLUME,
+    ENCODER_SCROLL,
+
+    ENCODER_ACTIONS_COUNT,
+};
+static enum encoder_action_type current_encoder_action_type = ENCODER_RGB_VALUE;
+void encoder_change(bool up) {
+    switch (current_encoder_action_type) {
+    case ENCODER_RGB_VALUE:
+        if (up) rgblight_increase_val();
+        else rgblight_decrease_val();
+        break;
+    case ENCODER_RGB_HUE:
+        if (up) rgblight_increase_hue();
+        else rgblight_decrease_hue();
+        break;
+    case ENCODER_SCROLL:
+        if (up) tap_code(KC_DOWN);
+        else tap_code(KC_UP);
+        break;
+    case ENCODER_VOLUME:
+    default:
+        if (up) tap_code(KC_VOLU);
+        else tap_code(KC_VOLD);
+        break;
+    }
+}
+void next_encoder_action(void) {
+    current_encoder_action_type = ((uint8_t)(current_encoder_action_type + 1)) % ENCODER_ACTIONS_COUNT;
+}
+void prev_encoder_action(void) {
+    current_encoder_action_type = ((uint8_t)(current_encoder_action_type - 1)) % ENCODER_ACTIONS_COUNT;
+}
+
 void encoder_update_user(uint8_t index, bool clockwise) {
     switch (biton32(layer_state)) {
     case 1:
@@ -396,18 +468,51 @@ void encoder_update_user(uint8_t index, bool clockwise) {
                 }
                 break;
             }
+            case MENU_ENUM: {
+                menu_action a = menu_current_action();
+                if (a.tp == MENU_ENUM) {
+                    if (clockwise) {
+                        a._enum.up();
+                    } else {
+                        a._enum.down();
+                    }
+                    menu_state.is_dirty = true;
+                }
+                break;
+            }
             default:
                 break;
             }
             return;
         }
-        if (clockwise) {
-            rgblight_increase_val();
-        } else {
-            rgblight_decrease_val();
-        }
+        encoder_change(clockwise);
         break;
     }
+}
+
+const char * get_current_encoder_action_name(void) {
+    switch (current_encoder_action_type) {
+    case ENCODER_VOLUME: return "VOL";
+    case ENCODER_RGB_VALUE: return "RGBV";
+    case ENCODER_RGB_HUE: return "RGBH";
+    case ENCODER_SCROLL: return "SCRLL";
+    default: return "?";
+    }
+}
+
+static menu_layer menu_layer_other = {
+    .prev = &menu_layer_root,
+    .lines = {
+        { .text = "Encoder", .action = { .tp = MENU_ENUM, ._enum = { .get = get_current_encoder_action_name, .up = next_encoder_action, .down = prev_encoder_action }}, },
+        { .text = "< Back", .action = { .tp = MENU_CALL, ._call = menu_back}, },
+        { .text = 0, },
+    },
+};
+
+void menu_goto_other(void) {
+    menu_state.current_menu_layer = &menu_layer_other;
+    menu_state.is_dirty = true;
+    menu_state.index = 0;
 }
 #endif
 
@@ -417,15 +522,15 @@ void keyboard_post_init_user(void) {
   rgblight_mode_noeeprom(RGBLIGHT_MODE_STATIC_LIGHT);
   menu_state.current_menu_layer = &menu_layer_root;
   menu_state.current_action = MENU_CALL;
+  // TODO(ktravis): save current_encoder_action_type
 }
 #endif
 
 bool process_record_user(uint16_t keycode, keyrecord_t *record) {
   switch (keycode) {
-    case MENU_SELECT:
+    case MENU_SELECT: {
       if (!record->event.pressed) {
         if (menu_state.is_open) {
-            size_t n = 0;
             menu_action a = menu_current_action();
             switch (a.tp) {
             case MENU_CALL:
@@ -435,21 +540,24 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
                 a._bool.set(!a._bool.get());
                 break;
             case MENU_INTEGER:
+            case MENU_ENUM:
                 if (menu_state.current_action == MENU_CALL) {
-                    menu_state.current_action = MENU_INTEGER;
+                    menu_state.current_action = a.tp;
                 } else {
                     menu_state.current_action = MENU_CALL;
                 }
                 break;
             default:
                 break;
-            };
+            }
         } else {
             menu_state.is_open = true;
+            menu_state.index = 0;
         }
         menu_state.is_dirty = true;
       }
       return false;
+    }
     default:
       return true;
   }
